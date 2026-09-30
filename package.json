@@ -1,0 +1,25 @@
+{
+  "name": "sky-climb",
+  "productName": "Sky Climb",
+  "version": "1.0.0",
+  "description": "Sky Climb - a 3D obby game",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-packager . \"Sky Climb\" --platform=win32 --arch=x64 --icon=icon.ico --overwrite --out=dist --ignore=\"^/dist\" --ignore=\"^/tools\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^33.4.11"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
+  }
+}
