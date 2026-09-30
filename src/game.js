@@ -1,7 +1,7 @@
-import * as THREE from '../vendor/three.module.js';
-import { LEVELS, buildLevel } from './levels.js';
-import { Sound } from './audio.js';
-import { IMPORTED_SAVE } from './save-import.js';
+import * as THREE from '../vendor/three.module.js?v=munkd3kb';
+import { LEVELS, buildLevel } from './levels.js?v=munkd3kb';
+import { Sound } from './audio.js?v=munkd3kb';
+import { IMPORTED_SAVE } from './save-import.js?v=munkd3kb';
 
 // ---------- Tuning ----------
 // Snappy, Roblox-like jump: same height as before but much less hang time.
