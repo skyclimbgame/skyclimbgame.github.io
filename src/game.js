@@ -1087,7 +1087,6 @@ window.addEventListener('keydown', (e) => {
 // ---------- Touch controls (phones / tablets) ----------
 // Left side: floating joystick to move. Right side: drag to look. Buttons: jump + pause.
 const touch = { joyId: null, joyX: 0, joyY: 0, ox: 0, oy: 0, lookId: null, lx: 0, ly: 0, jumpHeld: false, last: 0 };
-const JOY_RADIUS = 80;
 const TOUCH_LOOK_SENS = 0.006;
 const touchUI = document.getElementById('touch-ui');
 const joyBase = document.getElementById('joy-base');
@@ -1100,12 +1099,17 @@ function enableTouchMode() {
 if (window.matchMedia('(pointer: coarse)').matches) enableTouchMode();
 window.addEventListener('touchstart', () => { touch.last = performance.now(); enableTouchMode(); }, { capture: true, passive: true });
 
+// Joystick size matches the CSS: min(510px, 62vh, 42vw). The knob can travel a bit under half of it.
+const joySize = () => Math.min(510, window.innerHeight * 0.62, window.innerWidth * 0.42);
+const joyRadius = () => joySize() * 0.47;
+
 function placeJoystick(x, y) {
   joyBase.style.left = x + 'px';
   joyBase.style.top = y + 'px';
 }
 function restJoystick() {
-  placeJoystick(130, window.innerHeight - 140);
+  const r = joySize() / 2;
+  placeJoystick(r + 24, window.innerHeight - r - 24);
   joyKnob.style.transform = '';
   joyBase.classList.remove('active');
   touch.joyX = touch.joyY = 0;
@@ -1143,10 +1147,11 @@ touchUI.addEventListener('touchmove', (e) => {
     if (t.identifier === touch.joyId) {
       let dx = t.clientX - touch.ox, dy = t.clientY - touch.oy;
       const len = Math.hypot(dx, dy);
-      if (len > JOY_RADIUS) { dx *= JOY_RADIUS / len; dy *= JOY_RADIUS / len; }
+      const R = joyRadius();
+      if (len > R) { dx *= R / len; dy *= R / len; }
       joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-      touch.joyX = dx / JOY_RADIUS;
-      touch.joyY = dy / JOY_RADIUS;
+      touch.joyX = dx / R;
+      touch.joyY = dy / R;
     } else if (t.identifier === touch.lookId) {
       const sens = TOUCH_LOOK_SENS * (save.settings.sens / 100);
       cam.yaw -= (t.clientX - touch.lx) * sens;
