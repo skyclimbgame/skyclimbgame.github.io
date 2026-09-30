@@ -1087,7 +1087,7 @@ window.addEventListener('keydown', (e) => {
 // ---------- Touch controls (phones / tablets) ----------
 // Left side: floating joystick to move. Right side: drag to look. Buttons: jump + pause.
 const touch = { joyId: null, joyX: 0, joyY: 0, ox: 0, oy: 0, lookId: null, lx: 0, ly: 0, jumpHeld: false, last: 0 };
-const JOY_RADIUS = 60;
+const JOY_RADIUS = 80;
 const TOUCH_LOOK_SENS = 0.006;
 const touchUI = document.getElementById('touch-ui');
 const joyBase = document.getElementById('joy-base');
@@ -1105,7 +1105,7 @@ function placeJoystick(x, y) {
   joyBase.style.top = y + 'px';
 }
 function restJoystick() {
-  placeJoystick(110, window.innerHeight - 120);
+  placeJoystick(130, window.innerHeight - 140);
   joyKnob.style.transform = '';
   joyBase.classList.remove('active');
   touch.joyX = touch.joyY = 0;
