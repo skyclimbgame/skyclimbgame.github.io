@@ -1,7 +1,7 @@
-import * as THREE from '../vendor/three.module.js?v=munkd3kb';
-import { LEVELS, buildLevel } from './levels.js?v=munkd3kb';
-import { Sound } from './audio.js?v=munkd3kb';
-import { IMPORTED_SAVE } from './save-import.js?v=munkd3kb';
+import * as THREE from '../vendor/three.module.js?v=munkhl3z';
+import { LEVELS, buildLevel } from './levels.js?v=munkhl3z';
+import { Sound } from './audio.js?v=munkhl3z';
+import { IMPORTED_SAVE } from './save-import.js?v=munkhl3z';
 
 // ---------- Tuning ----------
 // Snappy, Roblox-like jump: same height as before but much less hang time.
@@ -1088,6 +1088,8 @@ window.addEventListener('keydown', (e) => {
 // Left side: floating joystick to move. Right side: drag to look. Buttons: jump + pause.
 const touch = { joyId: null, joyX: 0, joyY: 0, ox: 0, oy: 0, lookId: null, lx: 0, ly: 0, jumpHeld: false, last: 0 };
 const TOUCH_LOOK_SENS = 0.006;
+const JOY_DEAD = 0.08; // pushes smaller than this (fraction of the joystick radius) don't move you
+const JOY_FULL = 0.3; // at this far out (and beyond) you run at full speed
 const touchUI = document.getElementById('touch-ui');
 const joyBase = document.getElementById('joy-base');
 const joyKnob = document.getElementById('joy-knob');
@@ -1150,8 +1152,13 @@ touchUI.addEventListener('touchmove', (e) => {
       const R = joyRadius();
       if (len > R) { dx *= R / len; dy *= R / len; }
       joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-      touch.joyX = dx / R;
-      touch.joyY = dy / R;
+      // Full speed once the thumb is ~30% of the way out (the joystick is big, so don't
+      // make players stretch). Tiny pushes near the center are ignored or move slowly.
+      const push = Math.min(len, R) / R;
+      const speed = THREE.MathUtils.clamp((push - JOY_DEAD) / (JOY_FULL - JOY_DEAD), 0, 1);
+      const dirLen = Math.min(len, R) || 1; // dx, dy were clamped to this length above
+      touch.joyX = (dx / dirLen) * speed;
+      touch.joyY = (dy / dirLen) * speed;
     } else if (t.identifier === touch.lookId) {
       const sens = TOUCH_LOOK_SENS * (save.settings.sens / 100);
       cam.yaw -= (t.clientX - touch.lx) * sens;
@@ -1188,9 +1195,9 @@ function readInput() {
   // Q/E rotate the camera for players without a mouse
   if (keys.has('KeyQ')) cam.yaw += 0.03;
   if (keys.has('KeyE')) cam.yaw -= 0.03;
-  // Touch joystick (analog: push further = move faster; small dead zone)
+  // Touch joystick (already scaled to 0..1 speed, with its own dead zone)
   const joyLen = Math.hypot(touch.joyX, touch.joyY);
-  if (joyLen > 0.15) { fx += touch.joyX; fz -= touch.joyY; }
+  if (joyLen > 0) { fx += touch.joyX; fz -= touch.joyY; }
   const len = Math.hypot(fx, fz);
   if (len > 1) { fx /= len; fz /= len; }
   const sin = Math.sin(cam.yaw), cos = Math.cos(cam.yaw);
