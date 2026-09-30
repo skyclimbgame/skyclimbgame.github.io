@@ -71,7 +71,9 @@ function writeSave() {
 // ---------- Renderer / scene ----------
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Phones: slightly lower resolution keeps the frame rate smooth
+const IS_TOUCH_DEVICE = window.matchMedia('(pointer: coarse)').matches;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH_DEVICE ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = save.settings.shadows;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1008,6 +1010,8 @@ const EDGE_TURN_SPEED = 2.6; // radians per second at the very edge
 const mouse = { x: 0.5, inside: false };
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 document.addEventListener('mousemove', (e) => {
+  // Phones send fake mouse events after a tap — ignore those
+  if (performance.now() - touch.last < 1000) { mouse.inside = false; return; }
   mouse.x = e.clientX / window.innerWidth;
   mouse.inside = true;
   if (state !== 'playing') return;
@@ -1080,6 +1084,96 @@ window.addEventListener('keydown', (e) => {
   if (state === 'playing' && e.code !== 'Escape' && e.code !== 'F11') lockPointer();
 });
 
+// ---------- Touch controls (phones / tablets) ----------
+// Left side: floating joystick to move. Right side: drag to look. Buttons: jump + pause.
+const touch = { joyId: null, joyX: 0, joyY: 0, ox: 0, oy: 0, lookId: null, lx: 0, ly: 0, jumpHeld: false, last: 0 };
+const JOY_RADIUS = 60;
+const TOUCH_LOOK_SENS = 0.006;
+const touchUI = document.getElementById('touch-ui');
+const joyBase = document.getElementById('joy-base');
+const joyKnob = document.getElementById('joy-knob');
+const jumpBtn = document.getElementById('btn-jump');
+
+function enableTouchMode() {
+  document.body.classList.add('touch');
+}
+if (window.matchMedia('(pointer: coarse)').matches) enableTouchMode();
+window.addEventListener('touchstart', () => { touch.last = performance.now(); enableTouchMode(); }, { capture: true, passive: true });
+
+function placeJoystick(x, y) {
+  joyBase.style.left = x + 'px';
+  joyBase.style.top = y + 'px';
+}
+function restJoystick() {
+  placeJoystick(110, window.innerHeight - 120);
+  joyKnob.style.transform = '';
+  joyBase.classList.remove('active');
+  touch.joyX = touch.joyY = 0;
+}
+restJoystick();
+window.addEventListener('resize', () => { if (touch.joyId === null) restJoystick(); });
+
+touchUI.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.target === jumpBtn) {
+      jumpQueued = true;
+      touch.jumpHeld = true;
+      jumpBtn.classList.add('down');
+      touch.jumpId = t.identifier;
+    } else if (t.target.id === 'btn-pause') {
+      pause();
+    } else if (t.clientX < window.innerWidth * 0.45 && touch.joyId === null) {
+      touch.joyId = t.identifier;
+      touch.ox = t.clientX;
+      touch.oy = t.clientY;
+      placeJoystick(t.clientX, t.clientY);
+      joyBase.classList.add('active');
+    } else if (touch.lookId === null) {
+      touch.lookId = t.identifier;
+      touch.lx = t.clientX;
+      touch.ly = t.clientY;
+    }
+  }
+}, { passive: false });
+
+touchUI.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === touch.joyId) {
+      let dx = t.clientX - touch.ox, dy = t.clientY - touch.oy;
+      const len = Math.hypot(dx, dy);
+      if (len > JOY_RADIUS) { dx *= JOY_RADIUS / len; dy *= JOY_RADIUS / len; }
+      joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+      touch.joyX = dx / JOY_RADIUS;
+      touch.joyY = dy / JOY_RADIUS;
+    } else if (t.identifier === touch.lookId) {
+      const sens = TOUCH_LOOK_SENS * (save.settings.sens / 100);
+      cam.yaw -= (t.clientX - touch.lx) * sens;
+      cam.pitch = THREE.MathUtils.clamp(cam.pitch + (t.clientY - touch.ly) * sens, -1.0, 1.35);
+      touch.lx = t.clientX;
+      touch.ly = t.clientY;
+    }
+  }
+}, { passive: false });
+
+function endTouches(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touch.joyId) { touch.joyId = null; restJoystick(); }
+    if (t.identifier === touch.lookId) touch.lookId = null;
+    if (t.identifier === touch.jumpId) { touch.jumpId = null; touch.jumpHeld = false; jumpBtn.classList.remove('down'); }
+  }
+}
+touchUI.addEventListener('touchend', endTouches);
+touchUI.addEventListener('touchcancel', endTouches);
+
+function resetTouchControls() {
+  touch.joyId = touch.lookId = touch.jumpId = null;
+  touch.jumpHeld = false;
+  jumpBtn.classList.remove('down');
+  restJoystick();
+}
+
 function readInput() {
   let fx = 0, fz = 0;
   if (keys.has('KeyW') || keys.has('ArrowUp')) fz += 1;
@@ -1089,13 +1183,16 @@ function readInput() {
   // Q/E rotate the camera for players without a mouse
   if (keys.has('KeyQ')) cam.yaw += 0.03;
   if (keys.has('KeyE')) cam.yaw -= 0.03;
-  const len = Math.hypot(fx, fz) || 1;
-  fx /= len; fz /= len;
+  // Touch joystick (analog: push further = move faster; small dead zone)
+  const joyLen = Math.hypot(touch.joyX, touch.joyY);
+  if (joyLen > 0.15) { fx += touch.joyX; fz -= touch.joyY; }
+  const len = Math.hypot(fx, fz);
+  if (len > 1) { fx /= len; fz /= len; }
   const sin = Math.sin(cam.yaw), cos = Math.cos(cam.yaw);
   // forward = (-sin, -cos), right = (cos, -sin)
   const x = fx * cos - fz * sin;
   const z = -fx * sin - fz * cos;
-  const input = { x, z, jumpPressed: jumpQueued, jumpHeld: keys.has('Space') };
+  const input = { x, z, jumpPressed: jumpQueued, jumpHeld: keys.has('Space') || touch.jumpHeld };
   return input;
 }
 
@@ -1166,7 +1263,13 @@ function startLevel(i) {
   $('hud-hint').style.opacity = 1;
   setTimeout(() => { $('hud-hint').style.opacity = 0.35; }, 6000);
   jumpQueued = false;
-  lockPointer();
+  resetTouchControls();
+  if (document.body.classList.contains('touch')) {
+    // Phones: go fullscreen to hide the browser bars (not supported on iPhone — that's fine)
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+  } else {
+    lockPointer();
+  }
 }
 
 function die() {
@@ -1292,6 +1395,7 @@ function winLevel(g) {
 
 function pause() {
   if (state !== 'playing') return;
+  resetTouchControls();
   state = 'paused';
   pausedAt = performance.now();
   show('pause');
@@ -1604,8 +1708,14 @@ function update(now) {
     // Close-up: character on the right half of the screen, slowly turning
     player.facing += dt * 0.7;
     const p = player.pos;
-    camera.position.set(p.x - 1.2, p.y + 1.9, p.z + 5.2);
-    camera.lookAt(p.x - 1.6, p.y + 1.15, p.z);
+    if (window.innerWidth < 700 && window.innerHeight > window.innerWidth) {
+      // Phone held upright: options panel is along the bottom, so put the character up top
+      camera.position.set(p.x, p.y + 1.2, p.z + 6.5);
+      camera.lookAt(p.x, p.y - 0.6, p.z);
+    } else {
+      camera.position.set(p.x - 1.2, p.y + 1.9, p.z + 5.2);
+      camera.lookAt(p.x - 1.6, p.y + 1.15, p.z);
+    }
   } else if (state === 'menu') {
     menuAngle += dt * 0.08;
     const c = world.bounds.getCenter(new THREE.Vector3());

@@ -51,6 +51,7 @@ h2 { text-align: center; font-size: 32px; font-weight: 900; margin-bottom: 6px; 
   font-weight: 900;
   letter-spacing: 4px;
   line-height: 1;
+  text-align: center;
   text-shadow: 0 6px 0 #1d5fbf, 0 10px 20px rgba(0, 0, 0, 0.35);
 }
 .logo span:first-child { color: #fff; }
@@ -280,4 +281,119 @@ body.playing, body.playing * { cursor: none !important; }
   pointer-events: none;
   z-index: 4;
   transition: opacity 0.4s;
+}
+
+/* ---------- Touch controls (phones / tablets) ---------- */
+body.touch { touch-action: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+.btn, .tab, .level-card, .swatch, .style-btn { touch-action: manipulation; }
+#touch-ui { display: none; position: fixed; inset: 0; z-index: 4; touch-action: none; }
+body.touch.playing #touch-ui { display: block; }
+
+#joy-base {
+  position: absolute;
+  width: 130px;
+  height: 130px;
+  margin: -65px 0 0 -65px;
+  left: 110px;
+  bottom: 0;
+  top: auto;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  border: 3px solid rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+  opacity: 0.55;
+}
+#joy-base.active { opacity: 1; }
+#joy-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+#btn-jump {
+  position: absolute;
+  right: calc(28px + env(safe-area-inset-right));
+  bottom: calc(34px + env(safe-area-inset-bottom));
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.7);
+  background: rgba(61, 220, 132, 0.75);
+  color: #fff;
+  font-size: 44px;
+  font-weight: 900;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.25);
+}
+#btn-jump.down { transform: translateY(3px) scale(0.95); background: rgba(61, 220, 132, 1); }
+#btn-pause {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top));
+  right: calc(16px + env(safe-area-inset-right));
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  border: none;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 22px;
+}
+#rotate-hint {
+  display: none;
+  position: absolute;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+@media (orientation: portrait) { #rotate-hint { display: block; } }
+body.touch #hud-hint, body.touch #crosshair { display: none; }
+
+/* ---------- Small screens ---------- */
+@media (max-width: 700px), (max-height: 500px) {
+  .panel { padding: 18px 20px; min-width: 0; max-width: 94vw; max-height: 94vh; overflow-y: auto; gap: 8px; }
+  h2 { font-size: 24px; }
+  .logo { font-size: 58px; }
+  .subtitle { font-size: 15px; margin-bottom: 8px; }
+  .btn { font-size: 17px; padding: 9px 16px; }
+  .btn.big { font-size: 20px; }
+  .title-panel .btn, .title-panel .btn-pair { width: 250px; }
+  #level-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .level-card { padding: 8px 4px; }
+  .level-card .num { font-size: 26px; }
+  .tab { font-size: 13px; padding: 6px 10px; }
+  .stats div { padding: 6px 10px; }
+  .stats b { font-size: 18px; }
+  #hud-level { font-size: 16px; }
+  #hud-check { font-size: 12px; }
+  #hud-timer { font-size: 24px; }
+  .hud-right { font-size: 18px; }
+  /* Avatar: panel along the bottom so the character stays visible above */
+  .screen.side { justify-content: center; align-items: flex-end; padding: 0 0 8px; }
+  .avatar-panel { max-height: 52vh; }
+  .swatch { width: 26px; height: 26px; }
+  #board-table td { padding: 5px 6px; font-size: 14px; }
+}
+/* Short landscape phones: title + menu side by side */
+@media (max-height: 500px) and (orientation: landscape) {
+  .logo { font-size: 44px; }
+  .title-panel { gap: 6px; }
+  .screen.side { justify-content: flex-start; align-items: center; padding-left: 12px; }
+  .avatar-panel { max-height: 92vh; width: 46vw; }
+}
+/* Narrow upright phones: level name goes under the timer instead of behind it */
+@media (max-width: 520px) {
+  .hud-left { top: 58px; left: 14px; }
+  #rotate-hint { top: 124px; }
 }

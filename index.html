@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Sky Climb</title>
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="style.css">
@@ -21,6 +24,13 @@
     </div>
     <div id="crosshair"></div>
     <div id="hud-hint">Mouse look &nbsp;•&nbsp; WASD move &nbsp;•&nbsp; Space jump &nbsp;•&nbsp; Scroll zoom &nbsp;•&nbsp; R respawn &nbsp;•&nbsp; Esc pause</div>
+  </div>
+  <!-- Touch controls (phones / tablets only) -->
+  <div id="touch-ui">
+    <div id="joy-base"><div id="joy-knob"></div></div>
+    <button id="btn-jump" aria-label="Jump">⤒</button>
+    <button id="btn-pause" aria-label="Pause">⏸</button>
+    <div id="rotate-hint">📱↻ Turn your phone sideways for the best view</div>
   </div>
   <div id="toast" class="hidden"></div>
   <div id="flash"></div>
