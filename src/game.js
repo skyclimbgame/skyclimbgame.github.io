@@ -1,9 +1,9 @@
-import * as THREE from '../vendor/three.module.js?v=muqgieac';
-import { LEVELS, buildLevel, RaceCourse } from './levels.js?v=muqgieac';
-import { Sound } from './audio.js?v=muqgieac';
-import { IMPORTED_SAVE } from './save-import.js?v=muqgieac';
-import { RaceHost, RaceClient, cleanGameCode, CODE_LENGTH } from './net.js?v=muqgieac';
-import { MATH_TOPICS, makeQuestion } from './mathq.js?v=muqgieac';
+import * as THREE from '../vendor/three.module.js?v=muqgxtuz';
+import { LEVELS, buildLevel, RaceCourse } from './levels.js?v=muqgxtuz';
+import { Sound } from './audio.js?v=muqgxtuz';
+import { IMPORTED_SAVE } from './save-import.js?v=muqgxtuz';
+import { RaceHost, RaceClient, cleanGameCode, CODE_LENGTH } from './net.js?v=muqgxtuz';
+import { MATH_TOPICS, makeQuestion, checkAnswer } from './mathq.js?v=muqgxtuz';
 
 // ---------- Tuning ----------
 // Snappy, Roblox-like jump: same height as before but much less hang time.
@@ -2325,30 +2325,56 @@ function openMath(outOfEnergy) {
 }
 
 function renderMath() {
-  $('math-question').textContent = `${race.question.text} = ?`;
+  const q = race.question;
+  // "Simplify 6/8" and "2/3 = ?/12" already say what to find, so don't add "= ?" twice
+  $('math-question').textContent = q.text.startsWith('Simplify') || q.text.includes('?') ? q.text : `${q.text} = ?`;
   $('math-answer').textContent = race.answer;
   $('math-energy').textContent = Math.floor(race.energy).toLocaleString();
   $('math-close').disabled = race.energy <= 0;
+  // Extra keys (/ . −) only for questions that need them
+  const extra = $('keypad-extra');
+  const want = (q.keys || []).join('');
+  if (extra.dataset.keys !== want) {
+    extra.dataset.keys = want;
+    extra.innerHTML = '';
+    for (const k of q.keys || []) {
+      const b = document.createElement('button');
+      b.textContent = k;
+      b.addEventListener('click', () => mathKey(k));
+      extra.appendChild(b);
+    }
+  }
 }
 
+const MAX_ANSWER_LEN = 7;
 function mathKey(k) {
   if (!race || race.overlay !== 'math') return;
-  if (k === 'back') race.answer = race.answer.slice(0, -1);
+  let a = race.answer;
+  if (k === 'back') a = a.slice(0, -1);
   else if (k === 'enter') return submitMath();
-  else if (/^[0-9]$/.test(k) && race.answer.length < 5) race.answer += k;
+  else if (k === '−') a = a.startsWith('−') ? a.slice(1) : '−' + a; // flips the sign
+  else if (a.length >= MAX_ANSWER_LEN) { /* full */ }
+  else if (/^[0-9]$/.test(k)) a += k;
+  else if (k === '.' && !/[./]/.test(a)) a += /[0-9]$/.test(a) ? '.' : '0.';
+  else if (k === '/' && !/[./]/.test(a) && /[0-9]$/.test(a)) a += '/';
+  race.answer = a;
   renderMath();
 }
 
 function submitMath() {
-  if (!race.answer) return;
+  if (!race.answer || /[./]$/.test(race.answer)) return;
   const fb = $('math-feedback');
-  if (Number(race.answer) === race.question.answer) {
+  if (checkAnswer(race.question, race.answer)) {
     race.energy += ENERGY_PER_ANSWER;
     fb.textContent = 'Correct! +1,000 ⚡';
     fb.className = 'good';
     sound.checkpoint();
   } else {
-    fb.textContent = `Not quite: ${race.question.text} = ${race.question.answer}`;
+    const q = race.question;
+    // Show the right answer so players learn from it
+    if (q.simplest) fb.textContent = `Not quite: ${q.text.replace('Simplify ', '')} = ${q.answerText} (simplest form)`;
+    else if (q.text.includes('?')) fb.textContent = `Not quite: ${q.text.replace('?', q.answerText)}`;
+    else fb.textContent = `Not quite: ${q.text} = ${q.answerText}`;
     fb.className = 'bad';
     sound.crumble();
     const card = document.querySelector('.math-card');
@@ -2378,7 +2404,10 @@ $('btn-math').addEventListener('click', () => openMath(false));
 // Keys during a race. Returns true when the key was used here.
 function raceKey(e) {
   if (race.overlay === 'math') {
-    if (/^(Digit|Numpad)[0-9]$/.test(e.code)) mathKey(e.code.slice(-1));
+    if (/^(Digit|Numpad)[0-9]$/.test(e.code) && !e.shiftKey) mathKey(e.code.slice(-1));
+    else if (e.code === 'Slash' || e.code === 'NumpadDivide') mathKey('/');
+    else if (e.code === 'Period' || e.code === 'NumpadDecimal') mathKey('.');
+    else if (e.code === 'Minus' || e.code === 'NumpadSubtract') mathKey('−');
     else if (e.code === 'Backspace') mathKey('back');
     else if (e.code === 'Enter' || e.code === 'NumpadEnter') mathKey('enter');
     else if ((e.code === 'Escape' || e.code === 'KeyF') && performance.now() - race.overlayAt > 300) closeMath();

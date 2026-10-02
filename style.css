@@ -626,3 +626,10 @@ body.touch #race-board .row-item:nth-child(n+5) { display: none; }
 body:not(.touch) #btn-math { display: none !important; }
 body.race-host #crosshair, body.race-host #hud-hint { display: none; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); transform: none !important; }
+/* Extra math keys (/ . −) shown only when the question needs them */
+.keypad-extra:empty { display: none; }
+.keypad-extra button { background: #fff1b8; box-shadow: 0 3px 0 #e0c96a; }
+@media (max-height: 500px) and (orientation: landscape) {
+  .math-card .keypad { grid-row: 1 / span 5; }
+  .math-card .keypad-extra { grid-column: 2; grid-row: 6; }
+}
