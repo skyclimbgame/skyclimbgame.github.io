@@ -1,0 +1,16 @@
+{
+  "name": "skyclimb-relay",
+  "private": true,
+  "description": "Relay server for Sky Climb Race mode (Cloudflare Worker + Durable Object)",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.146.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20261001.1": true
+  }
+}

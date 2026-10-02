@@ -1,9 +1,9 @@
-import * as THREE from '../vendor/three.module.js?v=muqgxtuz';
-import { LEVELS, buildLevel, RaceCourse } from './levels.js?v=muqgxtuz';
-import { Sound } from './audio.js?v=muqgxtuz';
-import { IMPORTED_SAVE } from './save-import.js?v=muqgxtuz';
-import { RaceHost, RaceClient, cleanGameCode, CODE_LENGTH } from './net.js?v=muqgxtuz';
-import { MATH_TOPICS, makeQuestion, checkAnswer } from './mathq.js?v=muqgxtuz';
+import * as THREE from '../vendor/three.module.js?v=muqi2s8c';
+import { LEVELS, buildLevel, RaceCourse } from './levels.js?v=muqi2s8c';
+import { Sound } from './audio.js?v=muqi2s8c';
+import { IMPORTED_SAVE } from './save-import.js?v=muqi2s8c';
+import { RaceHost, RaceClient, cleanGameCode, CODE_LENGTH } from './net.js?v=muqi2s8c';
+import { MATH_TOPICS, makeQuestion, checkAnswer } from './mathq.js?v=muqi2s8c';
 
 // ---------- Tuning ----------
 // Snappy, Roblox-like jump: same height as before but much less hang time.
