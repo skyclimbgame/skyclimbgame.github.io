@@ -1,7 +1,9 @@
-import * as THREE from '../vendor/three.module.js?v=munkhl3z';
-import { LEVELS, buildLevel } from './levels.js?v=munkhl3z';
-import { Sound } from './audio.js?v=munkhl3z';
-import { IMPORTED_SAVE } from './save-import.js?v=munkhl3z';
+import * as THREE from '../vendor/three.module.js?v=muqgieac';
+import { LEVELS, buildLevel, RaceCourse } from './levels.js?v=muqgieac';
+import { Sound } from './audio.js?v=muqgieac';
+import { IMPORTED_SAVE } from './save-import.js?v=muqgieac';
+import { RaceHost, RaceClient, cleanGameCode, CODE_LENGTH } from './net.js?v=muqgieac';
+import { MATH_TOPICS, makeQuestion } from './mathq.js?v=muqgieac';
 
 // ---------- Tuning ----------
 // Snappy, Roblox-like jump: same height as before but much less hang time.
@@ -21,6 +23,16 @@ const JUMP_BUFFER = 0.13;
 const VANISH_DELAY = 0.55;
 const VANISH_GONE = 2.5;
 const SPINNER_SPEED = 0.6; // multiplier on every spinning bar's speed (1 = original)
+
+// Race mode
+const RACE_AHEAD = 160; // build the endless course this far ahead of the front-most racer
+const RACE_BEHIND = 40; // keep this much of the course behind your last checkpoint
+const ENERGY_START = 1000;
+const ENERGY_PER_ANSWER = 1000;
+const ENERGY_RUN_PER_SEC = 100; // running at full speed for 1 second uses this much
+const ENERGY_JUMP = 30;
+const RACE_SEND_EVERY = 0.1; // seconds between multiplayer position updates
+const RACE_MAX_PLAYERS = 40;
 
 // ---------- Save data ----------
 const SAVE_KEY = 'skyclimb-save-v1';
@@ -317,12 +329,16 @@ scene.add(lavaSea);
 const cloudGroup = new THREE.Group();
 scene.add(cloudGroup);
 const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x8a9aaa, roughness: 1, transparent: true, opacity: 0.95 });
-function buildClouds(bounds, parts) {
+// endless = race course: clouds sit off to the sides and the whole group travels with the racer
+function buildClouds(bounds, parts, endless = false) {
   cloudGroup.clear();
+  cloudGroup.position.set(0, 0, 0);
   const puff = new THREE.BoxGeometry(1, 1, 1);
-  const cx = (bounds.min.x + bounds.max.x) / 2, cz = (bounds.min.z + bounds.max.z) / 2;
+  const cx = endless ? 0 : (bounds.min.x + bounds.max.x) / 2, cz = endless ? 0 : (bounds.min.z + bounds.max.z) / 2;
   // Keep clouds away from the course so they never block the camera
-  const nearCourse = (x, z) => parts.some((p) => Math.hypot(p.center.x - x, p.center.z - z) < 35);
+  const nearCourse = endless
+    ? (x) => Math.abs(x) < 40 // the endless course runs straight along z near x = 0
+    : (x, z) => parts.some((p) => Math.hypot(p.center.x - x, p.center.z - z) < 35);
   for (let i = 0, tries = 0; i < 45 && tries < 500; tries++) {
     const ang = Math.random() * Math.PI * 2;
     const dist = 50 + Math.random() * 150;
@@ -378,8 +394,10 @@ function updateParticles(dt) {
 
 // ---------- World ----------
 class World {
-  constructor(levelIndex) {
+  // levelIndex: a normal level. course: a RaceCourse (endless, built as you go) instead.
+  constructor(levelIndex, course = null) {
     this.index = levelIndex;
+    this.course = course;
     this.group = new THREE.Group();
     scene.add(this.group);
     this.parts = [];
@@ -388,10 +406,38 @@ class World {
     this.t = 0;
     this.bounds = new THREE.Box3();
 
-    for (const def of buildLevel(levelIndex)) this._create(def);
+    const defs = course ? course.extend(-RACE_AHEAD) : buildLevel(levelIndex);
+    for (const def of defs) this._create(def);
 
     this.spawnPart = this.parts.find((p) => p.type === 'spawn');
-    buildClouds(this.bounds, this.parts);
+    buildClouds(this.bounds, this.parts, !!course);
+  }
+
+  // Endless course: build more ahead of `aheadZ`, and remove what's far behind `keepZ`
+  grow(aheadZ, keepZ) {
+    if (!this.course) return;
+    for (const def of this.course.extend(aheadZ - RACE_AHEAD)) this._create(def);
+    const cutoff = keepZ + RACE_BEHIND;
+    const shared = new Set([...matCache.values(), lavaMat, goldMat, iceMat, fallMat]);
+    const drop = (obj) => {
+      this.group.remove(obj);
+      obj.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material && !shared.has(o.material)) o.material.dispose();
+      });
+    };
+    this.parts = this.parts.filter((p) => {
+      if (p.base.z - p.size.z / 2 <= cutoff) return true;
+      drop(p.mesh);
+      if (p.beltTex) p.beltTex.dispose();
+      return false;
+    });
+    this.checkpoints = this.checkpoints.filter((c) => this.parts.includes(c));
+    this.spinners = this.spinners.filter((s) => {
+      if (s.group.position.z <= cutoff + 5) return true;
+      drop(s.group);
+      return false;
+    });
   }
 
   _create(def) {
@@ -654,7 +700,7 @@ class World {
 
 // ---------- Player ----------
 class Player {
-  constructor() {
+  constructor(avatar = save.avatar) {
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.onGround = false;
@@ -667,7 +713,7 @@ class Player {
     this.deadTimer = 0;
     this.padBoost = false;
     this.mesh = this._buildModel();
-    this.applyAvatar(save.avatar);
+    this.applyAvatar(avatar);
     scene.add(this.mesh);
     this.box = new THREE.Box3();
   }
@@ -988,6 +1034,7 @@ function overlaps(a, b) {
 const keys = new Set();
 let jumpQueued = false;
 window.addEventListener('keydown', (e) => {
+  if (e.target.matches?.('input, select, textarea')) return; // typing a name / game ID
   if (e.code === 'Space') {
     if (!keys.has('Space')) jumpQueued = true;
     e.preventDefault();
@@ -1014,7 +1061,7 @@ document.addEventListener('mousemove', (e) => {
   if (performance.now() - touch.last < 1000) { mouse.inside = false; return; }
   mouse.x = e.clientX / window.innerWidth;
   mouse.inside = true;
-  if (state !== 'playing') return;
+  if (!isControlling()) return;
   const sens = 0.0025 * (save.settings.sens / 100);
   cam.yaw -= e.movementX * sens;
   cam.pitch = THREE.MathUtils.clamp(cam.pitch + e.movementY * sens, -1.0, 1.35);
@@ -1022,14 +1069,14 @@ document.addEventListener('mousemove', (e) => {
 document.documentElement.addEventListener('mouseleave', () => { mouse.inside = false; });
 
 function edgeTurn(dt) {
-  if (state !== 'playing' || document.pointerLockElement === canvas || !mouse.inside) return;
+  if (!isControlling() || document.pointerLockElement === canvas || !mouse.inside) return;
   let push = 0;
   if (mouse.x < EDGE_ZONE) push = (EDGE_ZONE - mouse.x) / EDGE_ZONE;
   else if (mouse.x > 1 - EDGE_ZONE) push = -(mouse.x - (1 - EDGE_ZONE)) / EDGE_ZONE;
   cam.yaw += push * EDGE_TURN_SPEED * (save.settings.sens / 100) * dt;
 }
 window.addEventListener('wheel', (e) => {
-  if (state !== 'playing') return;
+  if (!isControlling()) return;
   cam.dist = THREE.MathUtils.clamp(cam.dist + Math.sign(e.deltaY) * 0.8, 3, 14);
 });
 
@@ -1064,7 +1111,7 @@ function updateShoulderCamera(dt) {
   camera.lookAt(camAim.copy(camPivot).addScaledVector(camBack, -30));
 }
 canvas.addEventListener('mousedown', () => {
-  if (state === 'playing' && document.pointerLockElement !== canvas) lockPointer();
+  if (isControlling() && document.pointerLockElement !== canvas) lockPointer();
 });
 
 // Capture (hide) the mouse for Rivals-style look. Browsers only allow this right after a
@@ -1081,7 +1128,7 @@ function lockPointer() {
 document.addEventListener('pointerlockchange', () => { lockPending = false; });
 document.addEventListener('pointerlockerror', () => { lockPending = false; });
 window.addEventListener('keydown', (e) => {
-  if (state === 'playing' && e.code !== 'Escape' && e.code !== 'F11') lockPointer();
+  if (isControlling() && e.code !== 'Escape' && e.code !== 'F11') lockPointer();
 });
 
 // ---------- Touch controls (phones / tablets) ----------
@@ -1231,7 +1278,8 @@ let levelsTab = 1;
 let menuAngle = 0;
 
 const $ = (id) => document.getElementById(id);
-const screens = ['title', 'levels', 'settings', 'pause', 'win', 'avatar', 'board'];
+const screens = ['title', 'levels', 'settings', 'pause', 'win', 'avatar', 'board',
+  'race-mode', 'race-role', 'race-host', 'race-join', 'race-wait', 'race-menu', 'race-results'];
 function show(name) {
   for (const s of screens) $('screen-' + s).classList.toggle('hidden', s !== name);
 }
@@ -1314,6 +1362,7 @@ function toast(text) {
 
 function updateHud() {
   $('hud-deaths').textContent = `💀 ${deaths}`;
+  if (race) return updateRaceHud();
   $('hud-check').textContent = `Checkpoint ${checkpointsHit}/${world.checkpoints.length}`;
 }
 
@@ -1406,6 +1455,7 @@ function winLevel(g) {
 }
 
 function pause() {
+  if (race) return openRaceMenu(); // races can't be paused — open the race menu instead
   if (state !== 'playing') return;
   resetTouchControls();
   state = 'paused';
@@ -1425,6 +1475,7 @@ function goToMenu() {
   state = 'menu';
   document.exitPointerLock?.();
   $('hud').classList.add('hidden');
+  hideRaceOverlays();
   loadLevel(Math.min(save.unlocked, LEVELS.length) - 1, true);
   show('title');
 }
@@ -1439,12 +1490,13 @@ function onKey(e) {
     toggleFullscreen();
     return;
   }
+  if (race && raceKey(e)) return; // math answers, race menu, F for energy
   if (e.code === 'Escape') {
     if (state === 'playing') pause();
     else if (state === 'paused' && performance.now() - pausedAt > 300 && !$('screen-pause').classList.contains('hidden')) resume();
     return;
   }
-  if (state === 'playing' && e.code === 'KeyR' && !player.dead) respawn();
+  if (isControlling() && e.code === 'KeyR' && !player.dead) respawn();
 }
 
 function toggleFullscreen() {
@@ -1660,8 +1712,857 @@ document.addEventListener('click', (e) => {
     case 'restart': startLevel(levelIndex); break;
     case 'next': startLevel(Math.min(levelIndex + 1, LEVELS.length - 1)); break;
     case 'menu': goToMenu(); break;
+    default: raceAction(btn.dataset.action, btn);
   }
 });
+
+// =====================================================================
+// ---------- Race mode (multiplayer) ----------
+// =====================================================================
+// Flow: Race → Math or Normal mode → Host or Join.
+// The host's device runs the game: it keeps the player list, starts the race, keeps the
+// clock, passes everyone's positions around and decides the winner. The host only watches.
+// The course is endless; whoever gets the farthest before time runs out wins.
+
+let race = null;
+let raceChosenMode = 'math';
+const spectate = { focus: new THREE.Vector3(), camPos: new THREE.Vector3(), init: false };
+const HAIR_IDS = new Set(HAIR_STYLES.map(([id]) => id));
+const NO_INPUT = { x: 0, z: 0, jumpPressed: false, jumpHeld: false };
+
+// True when the local player is actually steering (not in a menu, math panel, results, …)
+function isControlling() {
+  if (state !== 'playing') return false;
+  if (!race) return true;
+  return race.role === 'player' && !race.overlay && (race.phase === 'running' || race.phase === 'countdown');
+}
+
+// Everything that arrives over the network is checked before use
+const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 16) || 'Player';
+const num = (v, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+const round1 = (v) => Math.round(v * 10) / 10;
+function cleanAvatar(a) {
+  const out = { ...DEFAULT_AVATAR };
+  if (a && typeof a === 'object') {
+    for (const k of ['skin', 'hair', 'shirt', 'pants', 'shoes']) {
+      if (Number.isInteger(a[k]) && a[k] >= 0 && a[k] <= 0xffffff) out[k] = a[k];
+    }
+    if (HAIR_IDS.has(a.hairStyle)) out.hairStyle = a.hairStyle;
+  }
+  return out;
+}
+const cleanTopic = (t) => (MATH_TOPICS[t] ? t : 'mix');
+const cleanMode = (m) => (m === 'normal' ? 'normal' : 'math');
+const modeName = (m) => (m === 'math' ? '🧮 Math mode' : '🏃 Normal mode');
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+function fmtClock(sec) {
+  const s = Math.max(0, Math.ceil(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function setStatus(id, text, isError = false) {
+  const el = $(id);
+  el.textContent = text;
+  el.classList.toggle('error', isError);
+}
+
+function newRace(role, mode) {
+  return {
+    role, mode, phase: 'lobby', topic: 'mix', duration: 180, seed: 0, remaining: 0,
+    roster: new Map(), // id -> { name, avatar }
+    live: new Map(), // id -> { s: [x, y, z, facing, onGround], d: distance }
+    ghosts: new Map(), // id -> Ghost (other racers you can see)
+    myId: null, name: '', net: null, code: '', overlay: null, overlayAt: 0,
+    energy: ENERGY_START, best: 0, sendT: 0, hudT: 0, growT: 0, startAt: 0,
+    question: null, answer: '', timers: [],
+  };
+}
+
+// ----- Other racers, drawn as their avatars with a name tag -----
+class Ghost {
+  constructor(name, avatar) {
+    this.player = new Player(avatar);
+    this.player.mesh.visible = false;
+    this.target = new THREE.Vector3();
+    this.has = false;
+    this.facing = Math.PI;
+    this.grounded = true;
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 64;
+    const g = c.getContext('2d');
+    g.font = 'bold 32px "Segoe UI", Arial, sans-serif';
+    const w = Math.min(248, g.measureText(name).width + 28);
+    g.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    if (g.roundRect) { g.beginPath(); g.roundRect((256 - w) / 2, 8, w, 48, 16); g.fill(); } else g.fillRect((256 - w) / 2, 8, w, 48);
+    g.fillStyle = '#fff';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(name, 128, 33);
+    this.tex = new THREE.CanvasTexture(c);
+    this.tex.colorSpace = THREE.SRGBColorSpace;
+    this.sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex, transparent: true, depthWrite: false }));
+    this.sprite.scale.set(2.6, 0.65, 1);
+    this.sprite.position.y = 2.8;
+    this.player.mesh.add(this.sprite);
+  }
+
+  set(s) {
+    this.target.set(s[0], s[1], s[2]);
+    this.facing = s[3];
+    this.grounded = !!s[4];
+    if (!this.has) {
+      this.player.pos.copy(this.target);
+      this.has = true;
+      this.player.mesh.visible = true;
+    }
+  }
+
+  update(dt) {
+    if (!this.has) return;
+    const p = this.player;
+    const before = p.pos.clone();
+    if (p.pos.distanceTo(this.target) > 12) p.pos.copy(this.target); // respawned: jump straight there
+    else p.pos.lerp(this.target, Math.min(1, dt * 12));
+    p.vel.subVectors(p.pos, before).divideScalar(Math.max(dt, 0.001));
+    p.onGround = this.grounded;
+    p.faceYaw = this.facing;
+    p.animate(dt, elapsed);
+  }
+
+  dispose() {
+    scene.remove(this.player.mesh);
+    this.player.mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    this.tex.dispose();
+    this.sprite.material.dispose();
+  }
+}
+
+function syncGhosts() {
+  if (!race || race.phase === 'lobby') return;
+  for (const [id, p] of race.roster) {
+    if (id !== race.myId && !race.ghosts.has(id)) race.ghosts.set(id, new Ghost(p.name, p.avatar));
+  }
+  for (const [id, gh] of race.ghosts) {
+    if (!race.roster.has(id)) { gh.dispose(); race.ghosts.delete(id); race.live.delete(id); }
+  }
+}
+
+function clearGhosts() {
+  if (!race) return;
+  for (const gh of race.ghosts.values()) gh.dispose();
+  race.ghosts.clear();
+}
+
+// ----- Menus: Race → mode → host / join -----
+function chooseRaceMode(mode) {
+  raceChosenMode = cleanMode(mode);
+  $('race-role-title').textContent = modeName(raceChosenMode);
+  show('race-role');
+}
+
+for (const [id, label] of Object.entries(MATH_TOPICS)) {
+  const o = document.createElement('option');
+  o.value = id;
+  o.textContent = label;
+  if (id === 'mix') o.selected = true;
+  $('host-topic').appendChild(o);
+}
+
+// ----- Hosting -----
+function hostRace() {
+  race = newRace('host', raceChosenMode);
+  race.duration = +$('host-time').value;
+  race.topic = cleanTopic($('host-topic').value);
+  $('host-title').textContent = `Hosting · ${modeName(race.mode)}`;
+  $('host-topic-wrap').classList.toggle('hidden', race.mode !== 'math');
+  $('host-code').textContent = '· · · · · ·';
+  setStatus('host-status', 'Creating your game…');
+  renderHostLobby();
+  show('race-host');
+
+  const net = new RaceHost({
+    onReady: (code) => {
+      if (race?.net !== net) return;
+      race.code = code;
+      $('host-code').textContent = code;
+      setStatus('host-status', '');
+      renderHostLobby();
+    },
+    onJoin: () => {},
+    onLeave: (id) => { if (race?.net === net) hostRemovePlayer(id); },
+    onMessage: (id, msg) => { if (race?.net === net) hostOnMessage(id, msg); },
+    onError: (text) => { if (race?.net === net) setStatus('host-status', text, true); },
+  });
+  race.net = net;
+  try { net.start(); } catch (e) { setStatus('host-status', e.message, true); }
+}
+
+function hostOnMessage(id, msg) {
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.t === 'hello') {
+    if (race.roster.size >= RACE_MAX_PLAYERS && !race.roster.has(id)) {
+      race.net.send(id, { t: 'full' });
+      race.net.kick(id);
+      return;
+    }
+    race.roster.set(id, { name: cleanName(msg.name), avatar: cleanAvatar(msg.avatar) });
+    race.net.send(id, { t: 'welcome', id, mode: race.mode, topic: race.topic, duration: race.duration });
+    hostBroadcastRoster();
+    // Joining a race that already started: jump straight in
+    if (race.phase === 'countdown' || race.phase === 'running') race.net.send(id, hostStartMsg());
+    renderHostLobby();
+    syncGhosts();
+  } else if (msg.t === 'state' && race.roster.has(id) && Array.isArray(msg.s)) {
+    const s = msg.s.slice(0, 5).map((v) => num(v));
+    race.live.set(id, { s, d: Math.max(0, num(msg.d)) });
+  }
+}
+
+function hostStartMsg() {
+  const running = race.phase === 'running';
+  return {
+    t: 'start', seed: race.seed, mode: race.mode, topic: race.topic, duration: race.duration,
+    running, remaining: running ? race.remaining : race.duration,
+  };
+}
+
+function hostBroadcastRoster() {
+  race.net.broadcast({ t: 'roster', players: [...race.roster].map(([id, p]) => [id, p.name, p.avatar]) });
+}
+
+function hostRemovePlayer(id) {
+  if (!race.roster.delete(id)) return;
+  race.live.delete(id);
+  hostBroadcastRoster();
+  renderHostLobby();
+  syncGhosts();
+}
+
+function playerChip(name, avatar, onKick) {
+  const chip = document.createElement('div');
+  chip.className = 'player-chip';
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  dot.style.background = '#' + (avatar?.shirt ?? 0x888888).toString(16).padStart(6, '0');
+  const label = document.createElement('span');
+  label.textContent = name;
+  chip.append(dot, label);
+  if (onKick) {
+    const x = document.createElement('button');
+    x.textContent = '✕';
+    x.title = `Remove ${name}`;
+    x.addEventListener('click', onKick);
+    chip.appendChild(x);
+  } else {
+    chip.style.paddingRight = '12px';
+  }
+  return chip;
+}
+
+function renderHostLobby() {
+  if (!race || race.role !== 'host') return;
+  const box = $('host-players');
+  box.innerHTML = '';
+  for (const [id, p] of race.roster) box.appendChild(playerChip(p.name, p.avatar, () => race.net.kick(id)));
+  if (!race.roster.size) {
+    const note = document.createElement('div');
+    note.className = 'empty-note';
+    note.textContent = 'Waiting for players to join…';
+    box.appendChild(note);
+  }
+  $('host-count').textContent = race.roster.size;
+  $('btn-race-start').disabled = !race.code || race.roster.size === 0;
+}
+
+for (const id of ['host-time', 'host-topic']) {
+  $(id).addEventListener('change', () => {
+    if (!race || race.role !== 'host') return;
+    race.duration = +$('host-time').value;
+    race.topic = cleanTopic($('host-topic').value);
+    race.net?.broadcast({ t: 'settings', duration: race.duration, topic: race.topic });
+  });
+}
+
+function hostStart() {
+  if (!race || race.role !== 'host' || !race.roster.size || race.phase !== 'lobby') return;
+  race.seed = Math.floor(Math.random() * 1e9);
+  race.phase = 'countdown';
+  race.remaining = race.duration;
+  race.live.clear();
+  race.net.broadcast(hostStartMsg());
+  enterRaceWorld();
+  runCountdown(() => {
+    if (!race || race.role !== 'host') return;
+    race.phase = 'running';
+    race.startAt = performance.now();
+    race.remaining = race.duration;
+    race.net.broadcast({ t: 'go' });
+  });
+}
+
+function rankings() {
+  const list = [];
+  for (const [id, p] of race.roster) {
+    if (id === race.myId) continue;
+    list.push({ id, name: p.name, d: race.live.get(id)?.d || 0 });
+  }
+  if (race.role === 'player') list.push({ id: race.myId, name: race.name, d: race.best, me: true });
+  return list.sort((a, b) => b.d - a.d);
+}
+
+function hostFinish() {
+  if (!race || race.role !== 'host' || race.phase === 'results') return;
+  race.phase = 'results';
+  race.remaining = 0;
+  const results = rankings().map((r) => ({ id: r.id, name: r.name, d: Math.floor(r.d) }));
+  race.net.broadcast({ t: 'end', results: results.map((r) => [r.id, r.name, r.d]) });
+  showResults(results);
+}
+
+function hostAgain() {
+  if (!race || race.role !== 'host') return;
+  race.phase = 'lobby';
+  race.live.clear();
+  clearGhosts();
+  race.net.broadcast({ t: 'lobby' });
+  backToMenuWorld();
+  renderHostLobby();
+  show('race-host');
+}
+
+// ----- Joining -----
+function openJoin() {
+  $('join-name').value = save.raceName || '';
+  $('join-code').value = '';
+  setStatus('join-status', '');
+  $('btn-join-go').disabled = false;
+  show('race-join');
+  setTimeout(() => ($('join-name').value ? $('join-code') : $('join-name')).focus(), 50);
+}
+
+function joinRace() {
+  const rawName = $('join-name').value.trim();
+  const code = cleanGameCode($('join-code').value);
+  if (!rawName) return setStatus('join-status', 'Type your name first.', true);
+  if (code.length !== CODE_LENGTH) return setStatus('join-status', 'The game PIN is 6 numbers.', true);
+  const name = cleanName(rawName);
+  save.raceName = name;
+  writeSave();
+
+  race = newRace('player', raceChosenMode);
+  race.name = name;
+  race.code = code;
+  setStatus('join-status', 'Connecting…');
+  $('btn-join-go').disabled = true;
+
+  const client = new RaceClient({
+    onOpen: (myId) => {
+      if (race?.net !== client) return;
+      race.myId = myId;
+      client.send({ t: 'hello', name, avatar: save.avatar });
+    },
+    onMessage: (msg) => { if (race?.net === client && msg && typeof msg === 'object') playerOnMessage(msg); },
+    onClose: () => { if (race?.net === client) leaveRace('Lost connection to the host.'); },
+    onError: (text) => {
+      if (race?.net !== client) return;
+      race = null;
+      setStatus('join-status', text, true);
+      $('btn-join-go').disabled = false;
+    },
+  });
+  race.net = client;
+  client.join(code);
+}
+
+function playerOnMessage(msg) {
+  switch (msg.t) {
+    case 'welcome':
+      race.mode = cleanMode(msg.mode);
+      race.topic = cleanTopic(msg.topic);
+      race.duration = num(msg.duration, 180);
+      renderWait();
+      show('race-wait');
+      break;
+    case 'settings':
+      race.duration = num(msg.duration, race.duration);
+      race.topic = cleanTopic(msg.topic);
+      renderWait();
+      break;
+    case 'roster':
+      race.roster = new Map((Array.isArray(msg.players) ? msg.players : [])
+        .filter((p) => Array.isArray(p) && typeof p[0] === 'string')
+        .map(([id, name, av]) => [id, { name: cleanName(name), avatar: cleanAvatar(av) }]));
+      renderWait();
+      syncGhosts();
+      break;
+    case 'start':
+      race.seed = num(msg.seed) >>> 0;
+      race.mode = cleanMode(msg.mode);
+      race.topic = cleanTopic(msg.topic);
+      race.duration = num(msg.duration, 180);
+      race.remaining = num(msg.remaining, race.duration);
+      race.phase = msg.running ? 'running' : 'countdown';
+      race.live.clear();
+      enterRaceWorld();
+      if (msg.running) flashGo(); else runCountdown(null);
+      break;
+    case 'go':
+      if (race.phase === 'countdown') { race.phase = 'running'; flashGo(); }
+      break;
+    case 'snap':
+      if (race.phase !== 'running' && race.phase !== 'countdown') break;
+      if (race.phase === 'running') race.remaining = num(msg.r, race.remaining);
+      for (const row of Array.isArray(msg.s) ? msg.s : []) {
+        if (!Array.isArray(row) || row[0] === race.myId || !race.roster.has(row[0])) continue;
+        race.live.set(row[0], { s: row.slice(1, 6).map((v) => num(v)), d: num(row[6]) });
+      }
+      break;
+    case 'end':
+      race.phase = 'results';
+      race.remaining = 0;
+      updateRaceHud();
+      showResults((Array.isArray(msg.results) ? msg.results : [])
+        .filter((r) => Array.isArray(r))
+        .map(([id, name, d]) => ({ id, name: cleanName(name), d: Math.floor(num(d)) })));
+      break;
+    case 'lobby':
+      race.phase = 'lobby';
+      race.live.clear();
+      clearGhosts();
+      backToMenuWorld();
+      renderWait();
+      show('race-wait');
+      break;
+    case 'kicked': leaveRace('The host removed you from the game.'); break;
+    case 'closed': leaveRace('The host closed the game.'); break;
+    case 'full': leaveRace('That game is full.'); break;
+  }
+}
+
+function renderWait() {
+  if (!race || race.role !== 'player') return;
+  let info = `${modeName(race.mode)} · ${Math.round(race.duration / 60)} minute race`;
+  if (race.mode === 'math') info += ` · ${MATH_TOPICS[race.topic]}`;
+  if (race.mode !== raceChosenMode) info += ` (the host picked ${race.mode === 'math' ? 'Math' : 'Normal'} mode)`;
+  $('wait-info').textContent = info;
+  const box = $('wait-players');
+  box.innerHTML = '';
+  for (const [id, p] of race.roster) {
+    const chip = playerChip(id === race.myId ? `${p.name} (you)` : p.name, p.avatar, null);
+    box.appendChild(chip);
+  }
+  $('wait-count').textContent = race.roster.size;
+}
+
+// ----- Entering / leaving the race course -----
+function enterRaceWorld() {
+  sound.init();
+  sound.startMusic();
+  if (world) world.dispose();
+  applyTheme(1);
+  world = new World(null, new RaceCourse(race.seed));
+  const sp = world.spawnPart;
+  spawnPoint.set(sp.center.x, sp.box.max.y, sp.center.z);
+  spawnYaw = 0;
+  spawnFacing = Math.PI;
+  deaths = 0;
+  checkpointsHit = 0;
+  race.energy = ENERGY_START;
+  race.best = 0;
+  race.overlay = null;
+  race.question = null;
+  race.answer = '';
+  race.growT = 0;
+  clearGhosts();
+  syncGhosts();
+
+  show(null);
+  $('math-panel').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  $('race-hud').classList.remove('hidden');
+  $('hud-hint').style.opacity = 0;
+  const mathPlayer = race.role === 'player' && race.mode === 'math';
+  $('energy-bar').classList.toggle('hidden', !mathPlayer);
+  $('btn-math').classList.toggle('hidden', !mathPlayer);
+  $('btn-end-race').classList.toggle('hidden', race.role !== 'host');
+  document.body.classList.toggle('race-host', race.role === 'host');
+
+  if (race.role === 'host') {
+    state = 'race-host';
+    player.mesh.visible = false;
+    spectate.init = false;
+    $('hud-deaths').textContent = '';
+  } else {
+    state = 'playing';
+    player.spawnAt(spawnPoint, spawnFacing);
+    cam.yaw = spawnYaw;
+    cam.pitch = CAM_PITCH;
+    cam.curDist = cam.dist;
+    cam.target.copy(spawnPoint);
+    jumpQueued = false;
+    keys.clear();
+    resetTouchControls();
+    updateHud();
+    if (document.body.classList.contains('touch')) {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      lockPointer(); // may need a key press or click first — any key works
+    }
+  }
+  updateRaceHud();
+}
+
+// Back to the title-screen scenery (between races, while still connected)
+function backToMenuWorld() {
+  state = 'menu';
+  document.exitPointerLock?.();
+  $('hud').classList.add('hidden');
+  hideRaceOverlays();
+  loadLevel(Math.min(save.unlocked, LEVELS.length) - 1, true);
+}
+
+function hideRaceOverlays() {
+  for (const id of ['race-hud', 'countdown', 'math-panel']) $(id).classList.add('hidden');
+  document.body.classList.remove('race-host');
+  if (race) {
+    for (const t of race.timers) clearTimeout(t);
+    race.timers = [];
+    race.overlay = null;
+  }
+}
+
+function leaveRace(message) {
+  const r = race;
+  if (r) {
+    for (const t of r.timers) clearTimeout(t);
+    for (const gh of r.ghosts.values()) gh.dispose();
+    try { if (r.role === 'host') r.net?.close(); else r.net?.destroy(); } catch (e) { /* ignore */ }
+  }
+  race = null;
+  goToMenu();
+  if (message) toast(message);
+}
+
+// ----- Countdown -----
+function runCountdown(onDone) {
+  for (const t of race.timers) clearTimeout(t);
+  const el = $('countdown');
+  el.classList.remove('hidden', 'go');
+  el.textContent = '3';
+  sound.click();
+  race.timers = [
+    setTimeout(() => { el.textContent = '2'; sound.click(); }, 1000),
+    setTimeout(() => { el.textContent = '1'; sound.click(); }, 2000),
+    setTimeout(() => {
+      if (onDone) onDone();
+      if (race && race.role === 'host') flashGo();
+    }, 3000),
+  ];
+}
+
+function flashGo() {
+  const el = $('countdown');
+  el.textContent = 'GO!';
+  el.classList.remove('hidden');
+  el.classList.add('go');
+  sound.checkpoint();
+  race.timers.push(setTimeout(() => el.classList.add('hidden'), 900));
+}
+
+// ----- Race menu (Esc / pause button) — the race keeps going -----
+function openRaceMenu() {
+  if (!race || race.role !== 'player' || state !== 'playing' || race.overlay || race.phase === 'results') return;
+  race.overlay = 'menu';
+  race.overlayAt = performance.now();
+  resetTouchControls();
+  document.exitPointerLock?.();
+  show('race-menu');
+}
+
+function closeRaceMenu() {
+  if (!race || race.overlay !== 'menu') return;
+  race.overlay = null;
+  show(null);
+  jumpQueued = false;
+  lockPointer();
+}
+
+// ----- Energy + math questions (Math mode) -----
+function raceInput(input, dt) {
+  if (race.role !== 'player' || race.overlay || race.phase !== 'running') return NO_INPUT;
+  if (race.mode !== 'math') return input;
+  if (race.energy <= 0) {
+    openMath(true);
+    return NO_INPUT;
+  }
+  race.energy -= ENERGY_RUN_PER_SEC * Math.min(1, Math.hypot(input.x, input.z)) * dt;
+  if (input.jumpPressed && (player.onGround || player.coyote > 0)) race.energy -= ENERGY_JUMP;
+  race.energy = Math.max(0, race.energy);
+  return input;
+}
+
+function openMath(outOfEnergy) {
+  if (!race || race.role !== 'player' || race.mode !== 'math' || race.phase !== 'running') return;
+  if (race.overlay === 'math') return;
+  if (race.overlay === 'menu') show(null);
+  race.overlay = 'math';
+  race.overlayAt = performance.now();
+  resetTouchControls();
+  document.exitPointerLock?.();
+  if (!race.question) race.question = makeQuestion(race.topic);
+  race.answer = '';
+  const fb = $('math-feedback');
+  fb.textContent = '';
+  fb.className = '';
+  $('math-msg').innerHTML = outOfEnergy
+    ? 'Out of energy! Answer to get <b>+1,000</b> ⚡'
+    : 'Every right answer gives <b>+1,000</b> ⚡';
+  renderMath();
+  $('math-panel').classList.remove('hidden');
+}
+
+function renderMath() {
+  $('math-question').textContent = `${race.question.text} = ?`;
+  $('math-answer').textContent = race.answer;
+  $('math-energy').textContent = Math.floor(race.energy).toLocaleString();
+  $('math-close').disabled = race.energy <= 0;
+}
+
+function mathKey(k) {
+  if (!race || race.overlay !== 'math') return;
+  if (k === 'back') race.answer = race.answer.slice(0, -1);
+  else if (k === 'enter') return submitMath();
+  else if (/^[0-9]$/.test(k) && race.answer.length < 5) race.answer += k;
+  renderMath();
+}
+
+function submitMath() {
+  if (!race.answer) return;
+  const fb = $('math-feedback');
+  if (Number(race.answer) === race.question.answer) {
+    race.energy += ENERGY_PER_ANSWER;
+    fb.textContent = 'Correct! +1,000 ⚡';
+    fb.className = 'good';
+    sound.checkpoint();
+  } else {
+    fb.textContent = `Not quite: ${race.question.text} = ${race.question.answer}`;
+    fb.className = 'bad';
+    sound.crumble();
+    const card = document.querySelector('.math-card');
+    card.classList.remove('shake');
+    void card.offsetWidth;
+    card.classList.add('shake');
+  }
+  race.question = makeQuestion(race.topic);
+  race.answer = '';
+  renderMath();
+}
+
+function closeMath() {
+  if (!race || race.overlay !== 'math' || race.energy <= 0) return;
+  race.overlay = null;
+  $('math-panel').classList.add('hidden');
+  jumpQueued = false;
+  keys.clear();
+  lockPointer();
+}
+
+for (const b of document.querySelectorAll('.keypad button')) {
+  b.addEventListener('click', () => mathKey(b.dataset.key));
+}
+$('btn-math').addEventListener('click', () => openMath(false));
+
+// Keys during a race. Returns true when the key was used here.
+function raceKey(e) {
+  if (race.overlay === 'math') {
+    if (/^(Digit|Numpad)[0-9]$/.test(e.code)) mathKey(e.code.slice(-1));
+    else if (e.code === 'Backspace') mathKey('back');
+    else if (e.code === 'Enter' || e.code === 'NumpadEnter') mathKey('enter');
+    else if ((e.code === 'Escape' || e.code === 'KeyF') && performance.now() - race.overlayAt > 300) closeMath();
+    e.preventDefault();
+    return true;
+  }
+  if (race.overlay === 'menu') {
+    if (e.code === 'Escape' && performance.now() - race.overlayAt > 300) closeRaceMenu();
+    return true;
+  }
+  if (race.role !== 'player') return e.code === 'Escape';
+  if (e.code === 'KeyF' && race.mode === 'math' && race.phase === 'running') { openMath(false); return true; }
+  if (e.code === 'Escape') { openRaceMenu(); return true; }
+  return false;
+}
+
+// ----- Every frame during a race -----
+function raceTick(dt) {
+  // The clock: the host keeps the real time; players count down between updates
+  if (race.phase === 'running') {
+    if (race.role === 'host') {
+      race.remaining = race.duration - (performance.now() - race.startAt) / 1000;
+      if (race.remaining <= 0) hostFinish();
+    } else {
+      race.remaining = Math.max(0, race.remaining - dt);
+    }
+  }
+  if (!race || race.phase === 'lobby') return;
+
+  if (race.role === 'player' && race.phase === 'running') race.best = Math.max(race.best, -player.pos.z);
+
+  // Send positions ~10 times a second
+  race.sendT -= dt;
+  if (race.sendT <= 0 && race.phase !== 'results') {
+    race.sendT = RACE_SEND_EVERY;
+    if (race.role === 'player') {
+      const p = player.pos;
+      race.net.send({ t: 'state', s: [round1(p.x), round1(p.y), round1(p.z), round1(player.facing), player.onGround ? 1 : 0], d: round1(race.best) });
+    } else {
+      race.net.broadcast({
+        t: 'snap',
+        r: round1(race.remaining),
+        s: [...race.live].map(([id, v]) => [id, ...v.s, v.d]),
+      });
+    }
+  }
+
+  // Other racers
+  for (const [id, v] of race.live) race.ghosts.get(id)?.set(v.s);
+  for (const gh of race.ghosts.values()) gh.update(dt);
+
+  // Build the endless course ahead, clear it far behind (a few times a second)
+  race.growT -= dt;
+  if (race.growT <= 0) {
+    race.growT = 0.25;
+    let front = race.role === 'player' ? player.pos.z : spectate.focus.z;
+    for (const v of race.live.values()) front = Math.min(front, v.s[2]);
+    if (race.role === 'player') {
+      world.grow(Math.max(front, player.pos.z - 300), spawnPoint.z);
+    } else {
+      world.grow(front, spectate.focus.z + 20);
+    }
+  }
+  cloudGroup.position.z = race.role === 'player' ? player.pos.z : spectate.focus.z;
+
+  race.hudT -= dt;
+  if (race.hudT <= 0) {
+    race.hudT = 0.1;
+    updateRaceHud();
+  }
+}
+
+function updateRaceHud() {
+  if (!race) return;
+  $('hud-timer').textContent = fmtClock(race.phase === 'countdown' ? race.duration : race.remaining);
+  const list = rankings();
+  if (race.role === 'player') {
+    const place = list.findIndex((r) => r.me) + 1;
+    $('hud-level').textContent = `🏁 Race · ${modeName(race.mode)}`;
+    $('hud-check').textContent = `${Math.floor(race.best)} m · ${ordinal(place)} of ${list.length}`;
+    if (race.mode === 'math') {
+      $('energy-num').textContent = Math.floor(race.energy).toLocaleString();
+      $('energy-fill').style.width = Math.min(100, (race.energy / ENERGY_START) * 100) + '%';
+      $('energy-bar').classList.toggle('low', race.energy < 200);
+    }
+  } else {
+    $('hud-level').textContent = `🏁 Hosting · Game PIN ${race.code}`;
+    $('hud-check').textContent = `${race.roster.size} racer${race.roster.size === 1 ? '' : 's'} · ${modeName(race.mode)}`;
+  }
+  // Live leaderboard
+  const board = $('race-board');
+  board.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = 'Farthest';
+  board.appendChild(title);
+  list.slice(0, race.role === 'host' ? 10 : 6).forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'row-item' + (r.me ? ' me' : '');
+    const n = document.createElement('span');
+    n.textContent = `${i + 1}. ${r.name}`;
+    const d = document.createElement('span');
+    d.textContent = `${Math.floor(r.d)} m`;
+    row.append(n, d);
+    board.appendChild(row);
+  });
+}
+
+// ----- Results -----
+function showResults(results) {
+  document.exitPointerLock?.();
+  $('math-panel').classList.add('hidden');
+  $('countdown').classList.add('hidden');
+  race.overlay = null;
+  const ol = $('results-list');
+  ol.innerHTML = '';
+  results.forEach((r, i) => {
+    const li = document.createElement('li');
+    if (r.id === race.myId) li.classList.add('me');
+    const n = document.createElement('span');
+    n.textContent = `${['🥇', '🥈', '🥉'][i] || (i + 1) + '.'} ${r.name}${r.id === race.myId ? ' (you)' : ''}`;
+    const d = document.createElement('span');
+    d.textContent = `${r.d} m`;
+    li.append(n, d);
+    ol.appendChild(li);
+  });
+  const isHost = race.role === 'host';
+  if (isHost) {
+    $('results-you').textContent = results.length ? `🏆 ${results[0].name} wins!` : 'Nobody raced this time.';
+  } else {
+    const place = results.findIndex((r) => r.id === race.myId) + 1;
+    $('results-you').textContent = place
+      ? `You came ${ordinal(place)} out of ${results.length}, with ${Math.floor(race.best)} m!`
+      : `You went ${Math.floor(race.best)} m!`;
+  }
+  $('results-host-btns').classList.toggle('hidden', !isHost);
+  $('results-leave').classList.toggle('hidden', isHost);
+  $('results-wait').classList.toggle('hidden', isHost);
+  show('race-results');
+  sound.win();
+}
+
+// ----- Host's camera: follows whoever is in front -----
+function updateSpectatorCamera(dt) {
+  let lead = null;
+  for (const v of race?.live?.values() || []) if (!lead || v.d > lead.d) lead = v;
+  const target = lead ? new THREE.Vector3(lead.s[0], lead.s[1], lead.s[2]) : spawnPoint.clone();
+  const want = new THREE.Vector3(target.x + 7, target.y + 9, target.z + 16);
+  if (!spectate.init) {
+    spectate.focus.copy(target);
+    spectate.camPos.copy(want);
+    spectate.init = true;
+  }
+  spectate.focus.lerp(target, Math.min(1, dt * 3));
+  spectate.camPos.lerp(want, Math.min(1, dt * 3));
+  camera.position.copy(spectate.camPos);
+  camera.lookAt(spectate.focus.x, spectate.focus.y + 1, spectate.focus.z - 8);
+}
+
+function raceAction(action, btn) {
+  switch (action) {
+    case 'race': show('race-mode'); break;
+    case 'race-mode': chooseRaceMode(btn.dataset.mode); break;
+    case 'race-back-mode': show('race-mode'); break;
+    case 'race-host': hostRace(); break;
+    case 'race-join': openJoin(); break;
+    case 'race-back-role': show('race-role'); break;
+    case 'race-join-go': joinRace(); break;
+    case 'race-start': hostStart(); break;
+    case 'race-again': hostAgain(); break;
+    case 'race-host-cancel':
+    case 'race-leave': leaveRace(); break;
+    case 'race-menu-close': closeRaceMenu(); break;
+    case 'race-end-now': if (race?.role === 'host' && race.phase === 'running') hostFinish(); break;
+    case 'math-close': closeMath(); break;
+  }
+}
+
+for (const id of ['join-name', 'join-code']) {
+  $(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); joinRace(); }
+  });
+}
+$('join-code').addEventListener('input', (e) => { e.target.value = cleanGameCode(e.target.value); });
 
 // ---------- Main loop ----------
 let last = performance.now();
@@ -1682,7 +2583,7 @@ function update(now) {
   lavaSeaTex.offset.y = elapsed * 0.015;
 
 
-  if (state === 'playing' || state === 'menu' || state === 'won' || state === 'avatar') {
+  if (state === 'playing' || state === 'menu' || state === 'won' || state === 'avatar' || state === 'race-host') {
     acc += dt;
     while (acc >= STEP) {
       world.update(STEP);
@@ -1690,8 +2591,9 @@ function update(now) {
         player.step(STEP, world, { x: 0, z: 0, jumpPressed: false, jumpHeld: false });
       } else if (state === 'playing') {
         if (!player.dead) {
-          const input = readInput();
+          let input = readInput();
           jumpQueued = false;
+          if (race) input = raceInput(input, STEP); // countdown, menus and energy limit movement
           player.step(STEP, world, input);
           checkTriggers();
         } else {
@@ -1701,22 +2603,28 @@ function update(now) {
       }
       acc -= STEP;
     }
-    if (state === 'playing') {
+    if (state === 'playing' && !race) {
       runTime += dt;
       $('hud-timer').textContent = fmtTime(runTime);
     }
   }
+  if (race) raceTick(dt);
 
   updateParticles(dt);
   edgeTurn(dt);
   // No mouse cursor during gameplay — only the crosshair (menus bring it back)
-  document.body.classList.toggle('playing', state === 'playing');
+  document.body.classList.toggle('playing', isControlling());
   world.animate(dt, elapsed);
   player.faceYaw = state === 'playing' ? cam.yaw + Math.PI : null;
   player.animate(dt, elapsed);
+  // Keep the lava sea under the camera (it moves in whole texture tiles so it doesn't slide)
+  lavaSea.position.x = Math.round(camera.position.x / 25) * 25;
+  lavaSea.position.z = Math.round(camera.position.z / 25) * 25;
 
   // Camera
-  if (state === 'avatar') {
+  if (state === 'race-host') {
+    updateSpectatorCamera(dt);
+  } else if (state === 'avatar') {
     // Close-up: character on the right half of the screen, slowly turning
     player.facing += dt * 0.7;
     const p = player.pos;
@@ -1740,7 +2648,7 @@ function update(now) {
   }
 
   // Keep the sun's shadow box centered on the action
-  const focusPt = state === 'menu' ? spawnPoint : player.pos;
+  const focusPt = state === 'menu' ? spawnPoint : state === 'race-host' ? spectate.focus : player.pos;
   sun.position.set(focusPt.x + 25, focusPt.y + 45, focusPt.z + 18);
   sun.target.position.copy(focusPt);
   scene.userData.sky.position.copy(camera.position);
@@ -1766,6 +2674,7 @@ if (location.search.includes('debug')) {
     startLevel,
     cam,
     player,
+    get race() { return race; },
     teleport(x, y, z) { player.spawnAt(new THREE.Vector3(x, y, z)); },
     get info() {
       return { state, level: levelIndex, pos: player.pos.toArray().map((v) => +v.toFixed(2)), onGround: player.onGround,

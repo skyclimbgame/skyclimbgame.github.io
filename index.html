@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Sky Climb</title>
   <link rel="icon" href="icon.png">
-  <link rel="stylesheet" href="style.css?v=munkhl3z">
+  <link rel="stylesheet" href="style.css?v=muqgieac">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -35,12 +35,150 @@
   <div id="toast" class="hidden"></div>
   <div id="flash"></div>
 
+  <!-- Race: in-game extras -->
+  <div id="race-hud" class="hidden">
+    <div id="energy-bar" class="hidden">
+      <div class="energy-label">⚡ <span id="energy-num">1000</span></div>
+      <div class="energy-track"><div id="energy-fill"></div></div>
+      <div class="energy-hint">Press <b>F</b> for math questions</div>
+    </div>
+    <button id="btn-math" class="hidden" aria-label="Math questions">⚡ Math</button>
+    <div id="race-board"></div>
+    <button id="btn-end-race" class="btn danger small hidden" data-action="race-end-now">End race now</button>
+  </div>
+  <div id="countdown" class="hidden"></div>
+
+  <!-- Race: math questions -->
+  <div id="math-panel" class="hidden">
+    <div class="math-card">
+      <div class="math-energy">⚡ <span id="math-energy">0</span> energy</div>
+      <div id="math-msg">Out of energy! Answer to get <b>+1,000</b> ⚡</div>
+      <div id="math-question">7 × 8</div>
+      <div id="math-answer" aria-live="polite"></div>
+      <div id="math-feedback"></div>
+      <div class="keypad">
+        <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button>
+        <button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button>
+        <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button>
+        <button data-key="back" class="key-back">⌫</button><button data-key="0">0</button><button data-key="enter" class="key-enter">✓</button>
+      </div>
+      <button class="btn big" id="math-close" data-action="math-close">Back to the race ▶</button>
+    </div>
+  </div>
+
+  <!-- Race: pick Math or Normal mode -->
+  <div id="screen-race-mode" class="screen hidden">
+    <div class="panel">
+      <h2>🏁 Race</h2>
+      <p class="race-intro">The course goes on forever. Whoever gets the farthest before time runs out wins!</p>
+      <button class="btn big mode-btn" data-action="race-mode" data-mode="math">🧮 Math Mode<small>Running uses energy. Answer math questions to get more.</small></button>
+      <button class="btn mode-btn" data-action="race-mode" data-mode="normal">🏃 Normal Mode<small>Just race. No energy, no questions.</small></button>
+      <button class="btn" data-action="back-title">Back</button>
+    </div>
+  </div>
+
+  <!-- Race: host or join -->
+  <div id="screen-race-role" class="screen hidden">
+    <div class="panel">
+      <h2 id="race-role-title">🧮 Math Mode</h2>
+      <button class="btn big mode-btn" data-action="race-host">📺 Host<small>Show the game on a big screen. The host watches and doesn't play.</small></button>
+      <button class="btn mode-btn" data-action="race-join">🎮 Join<small>Type in the game PIN to race.</small></button>
+      <button class="btn" data-action="race-back-mode">Back</button>
+    </div>
+  </div>
+
+  <!-- Race: host lobby -->
+  <div id="screen-race-host" class="screen hidden">
+    <div class="panel wide host-panel">
+      <h2 id="host-title">Hosting · Math Mode</h2>
+      <div class="code-box">
+        <div class="code-label">Game PIN</div>
+        <div id="host-code">· · · · · ·</div>
+        <div class="code-help">Players go to <b>skyclimbgame.github.io</b> → Race → Join, and type this PIN</div>
+      </div>
+      <div class="host-settings">
+        <label>Race time
+          <select id="host-time">
+            <option value="120">2 minutes</option>
+            <option value="180" selected>3 minutes</option>
+            <option value="300">5 minutes</option>
+            <option value="600">10 minutes</option>
+          </select>
+        </label>
+        <label id="host-topic-wrap">Math questions
+          <select id="host-topic"></select>
+        </label>
+      </div>
+      <div class="host-players-head"><span>Players</span><b id="host-count">0</b></div>
+      <div id="host-players"><div class="empty-note">Waiting for players to join…</div></div>
+      <div id="host-status" class="status-line"></div>
+      <div class="btn-pair">
+        <button class="btn danger" data-action="race-host-cancel">Close game</button>
+        <button class="btn big" id="btn-race-start" data-action="race-start" disabled>Start race ▶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Race: join a game -->
+  <div id="screen-race-join" class="screen hidden">
+    <div class="panel">
+      <h2>🎮 Join a race</h2>
+      <label class="field">Your name
+        <input id="join-name" maxlength="16" autocomplete="off" placeholder="Your name">
+      </label>
+      <label class="field">Game PIN
+        <input id="join-code" maxlength="6" autocomplete="off" inputmode="numeric" pattern="[0-9]*" placeholder="123456">
+      </label>
+      <div id="join-status" class="status-line"></div>
+      <button class="btn big" id="btn-join-go" data-action="race-join-go">Join ▶</button>
+      <button class="btn" data-action="race-back-role">Back</button>
+    </div>
+  </div>
+
+  <!-- Race: waiting in the lobby (player) -->
+  <div id="screen-race-wait" class="screen hidden">
+    <div class="panel">
+      <h2>You're in! 🎉</h2>
+      <div id="wait-info" class="race-intro"></div>
+      <div class="host-players-head"><span>Players</span><b id="wait-count">0</b></div>
+      <div id="wait-players"></div>
+      <div class="status-line">Waiting for the host to start the race…</div>
+      <button class="btn danger" data-action="race-leave">Leave</button>
+    </div>
+  </div>
+
+  <!-- Race: menu during a race (player) -->
+  <div id="screen-race-menu" class="screen hidden">
+    <div class="panel">
+      <h2>Race menu</h2>
+      <p class="race-intro">The race keeps going while this menu is open!</p>
+      <button class="btn big" data-action="race-menu-close">Back to the race ▶</button>
+      <button class="btn danger" data-action="race-leave">Leave race</button>
+    </div>
+  </div>
+
+  <!-- Race: results -->
+  <div id="screen-race-results" class="screen hidden">
+    <div class="panel wide results-panel">
+      <h2>🏁 Race over!</h2>
+      <div id="results-you" class="rank"></div>
+      <ol id="results-list"></ol>
+      <div id="results-wait" class="status-line">Waiting for the host…</div>
+      <div class="btn-pair" id="results-host-btns">
+        <button class="btn danger" data-action="race-host-cancel">Close game</button>
+        <button class="btn big" data-action="race-again">Race again ▶</button>
+      </div>
+      <button class="btn danger" id="results-leave" data-action="race-leave">Leave</button>
+    </div>
+  </div>
+
   <!-- Title -->
   <div id="screen-title" class="screen">
     <div class="panel title-panel">
       <h1 class="logo"><span>SKY</span> <span>CLIMB</span></h1>
       <p class="subtitle">Jump. Dodge the lava. Reach the top.</p>
       <button class="btn big" data-action="play">▶ Play</button>
+      <button class="btn orange" data-action="race">🏁 Race (Multiplayer)</button>
       <div class="btn-pair">
         <button class="btn" data-action="levels">Levels</button>
         <button class="btn" data-action="board">🏆 Leaderboard</button>
@@ -145,6 +283,7 @@
     </div>
   </div>
 
-  <script type="module" src="src/game.js?v=munkhl3z"></script>
+  <script src="vendor/peerjs.min.js?v=muqgieac"></script>
+  <script type="module" src="src/game.js?v=muqgieac"></script>
 </body>
 </html>

@@ -531,3 +531,139 @@ export function buildLevel(index) {
   LEVELS[index].build(b);
   return b.parts;
 }
+
+// ===================== Race mode: endless course =====================
+
+// Small seeded random number generator, so every player gets the same course from the same seed
+export function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Builds a never-ending course straight ahead (-z), a few "segments" at a time.
+// Obstacles get harder the farther you go. Distance = how far along -z you are.
+export class RaceCourse {
+  constructor(seed) {
+    this.rand = seededRandom(seed);
+    this.b = new Builder();
+    this.b.start(10);
+    this.handed = 0; // how many parts have already been given to the game
+    this.segments = 0;
+  }
+
+  // Generate until the course reaches past `z` (a negative number), return the new parts
+  extend(z) {
+    while (this.b.last.pos[2] > z) this._segment();
+    const fresh = this.b.parts.slice(this.handed);
+    this.handed = this.b.parts.length;
+    return fresh;
+  }
+
+  _r(a, b) { return a + this.rand() * (b - a); }
+  _pick(list) { return list[Math.floor(this.rand() * list.length)]; }
+
+  // Steer sideways offsets back toward the middle so the course doesn't wander off
+  _side(amount = 1.2) {
+    const x = this.b.last.pos[0];
+    return clampNum(this._r(-amount, amount) - x * 0.25, -2.5, 2.5);
+  }
+
+  // Keep the course between roughly 0 and 16 high
+  _dy(max = 1) {
+    const top = this.b.last.top;
+    if (top > 14) return -this._r(0.5, max);
+    if (top < 1) return this._r(0, max);
+    return Math.round(this._r(-max, max) * 2) / 2;
+  }
+
+  _segment() {
+    const b = this.b;
+    const dist = -b.last.pos[2];
+    const tier = Math.min(5, Math.floor(dist / 120)); // 0 = easy ... 5 = hardest
+    const hop = (base) => Math.min(3.8, base + tier * 0.25); // gaps grow slowly
+    const size = Math.max(1.8, 3.6 - tier * 0.35);
+
+    const kinds = ['hops', 'hops', 'stairs', 'lavaStrip'];
+    if (tier >= 1) kinds.push('mover', 'pad');
+    if (tier >= 2) kinds.push('vanish', 'spinner', 'sweeper');
+    if (tier >= 3) kinds.push('ice', 'conveyor', 'fall');
+    if (tier >= 4) kinds.push('beam', 'spinner', 'mover');
+    const kind = this._pick(kinds);
+
+    switch (kind) {
+      case 'hops': {
+        const n = 3 + Math.floor(this._r(0, 3));
+        for (let i = 0; i < n; i++) {
+          const dy = this._dy(1);
+          b.p(dy > 0.5 ? hop(2) : hop(2.6), dy, size, size, { side: this._side() });
+        }
+        break;
+      }
+      case 'stairs': {
+        const up = b.last.top < 10;
+        for (let i = 0; i < 4; i++) b.p(hop(1.8), up ? 1 : -1, size, size, { side: this._side(0.6) });
+        break;
+      }
+      case 'lavaStrip': {
+        b.p(hop(2), this._dy(0.5), 10, 4);
+        b.lavaStrip(-2.2, 1.2).lavaStrip(2.2, 1.2);
+        break;
+      }
+      case 'mover': {
+        for (let i = 0; i < 2; i++) {
+          b.p(hop(2.4), 0, 3, 3, { move: { axis: 'side', dist: this._r(2, 3.5), speed: this._r(1, 1.6) + tier * 0.15, phase: this._r(0, 6) } });
+        }
+        b.p(hop(2.4), 0, 4, 4);
+        break;
+      }
+      case 'pad': {
+        if (b.last.top > 10) { b.p(hop(2.4), -1, 4, 4); break; }
+        b.p(2.2, 0, 3, 3, { type: 'pad' }).p(2.5, 4.5, 4, 4);
+        break;
+      }
+      case 'vanish': {
+        for (let i = 0; i < 3; i++) b.p(hop(2.3), this._dy(0.5), 2.5, 2.5, { type: 'vanish', side: this._side(1) });
+        b.p(hop(2.3), 0, 4, 4);
+        break;
+      }
+      case 'spinner': {
+        b.p(hop(2.2), this._dy(0.5), 7, 7).spin(this._r(1.2, 1.8) + tier * 0.2, { arms: tier >= 4 ? 2 : 1 });
+        break;
+      }
+      case 'sweeper': {
+        b.p(hop(2), this._dy(0.5), 10, 5);
+        b.sweeper({ offset: -2.5, speed: 2 + tier * 0.3 }).sweeper({ offset: 2.5, speed: 2.4 + tier * 0.3, phase: 1.5 });
+        break;
+      }
+      case 'ice': {
+        b.p(hop(2), 0, 10, 3, { type: 'ice' });
+        for (let i = 0; i < 2; i++) b.p(hop(2.4), this._dy(0.5), 2.5, 2.5, { type: 'ice', side: this._side() });
+        break;
+      }
+      case 'conveyor': {
+        b.p(hop(2), 0, 10, 4, { type: 'conveyor', push: { axis: 'side', speed: (this.rand() < 0.5 ? -1 : 1) * (3 + tier * 0.4) } });
+        break;
+      }
+      case 'fall': {
+        for (let i = 0; i < 3; i++) b.p(hop(2.4), this._dy(0.5), 2.5, 2.5, { type: 'fall', side: this._side() });
+        b.p(hop(2.4), 0, 4, 4);
+        break;
+      }
+      case 'beam': {
+        b.p(2, 0, 12, 1.4).sweeper({ axis: 'along', dist: 4.5, speed: 1.8 });
+        b.p(2.5, 0.5, 3, 3);
+        break;
+      }
+    }
+
+    this.segments++;
+    if (this.segments % 4 === 0) b.check(2.5, 0); // checkpoint every few segments
+  }
+}
+
+function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }

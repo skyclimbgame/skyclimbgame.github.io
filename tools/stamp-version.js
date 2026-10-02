@@ -12,7 +12,8 @@ const indexPath = path.join(root, 'index.html');
 let html = fs.readFileSync(indexPath, 'utf8');
 html = html
   .replace(/href="style\.css(\?v=[^"]*)?"/, `href="style.css?v=${v}"`)
-  .replace(/src="src\/game\.js(\?v=[^"]*)?"/, `src="src/game.js?v=${v}"`);
+  .replace(/src="src\/game\.js(\?v=[^"]*)?"/, `src="src/game.js?v=${v}"`)
+  .replace(/src="vendor\/peerjs\.min\.js(\?v=[^"]*)?"/, `src="vendor/peerjs.min.js?v=${v}"`);
 fs.writeFileSync(indexPath, html);
 
 // src/*.js: every relative `import ... from './x.js'` (and ../vendor)

@@ -399,3 +399,230 @@ body.touch #hud-hint, body.touch #crosshair { display: none; }
   .hud-left { top: 58px; left: 14px; }
   #rotate-hint { top: 124px; }
 }
+
+/* ===================== Race mode ===================== */
+.btn.orange { background: #ff9f43; box-shadow: 0 5px 0 #c9711c; }
+.btn.orange:active { box-shadow: 0 2px 0 #c9711c; }
+.title-panel .btn.orange { width: 280px; }
+.mode-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.mode-btn small { font-size: 13px; font-weight: 700; opacity: 0.9; }
+.race-intro { text-align: center; font-weight: 700; max-width: 380px; margin: 0 auto; }
+.status-line { text-align: center; font-weight: 700; color: #4f6585; min-height: 1.2em; }
+.status-line.error { color: #d63031; }
+
+.field { display: flex; flex-direction: column; gap: 4px; font-weight: 800; }
+.field input {
+  font: inherit;
+  font-size: 22px;
+  font-weight: 800;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 3px solid #d5deec;
+  color: #22324d;
+  outline: none;
+}
+.field input:focus { border-color: #4f8cff; }
+#join-code { letter-spacing: 6px; text-transform: uppercase; text-align: center; font-size: 28px; }
+
+.host-panel { max-width: 640px; }
+.code-box { text-align: center; background: #22324d; color: #fff; border-radius: 16px; padding: 12px; }
+.code-label { font-size: 14px; font-weight: 800; opacity: 0.8; }
+#host-code { font-size: 64px; font-weight: 900; letter-spacing: 10px; line-height: 1.1; color: #ffd23f; user-select: text; }
+.code-help { font-size: 14px; font-weight: 700; opacity: 0.9; }
+.host-settings { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.host-settings label { display: flex; flex-direction: column; font-weight: 800; font-size: 14px; gap: 4px; }
+.host-settings select { font: inherit; font-weight: 700; font-size: 16px; padding: 6px 10px; border-radius: 10px; border: 2px solid #d5deec; }
+.host-players-head { display: flex; justify-content: space-between; font-weight: 900; }
+#host-players, #wait-players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 30vh;
+  overflow-y: auto;
+  min-height: 40px;
+}
+.player-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #eef4ff;
+  border-radius: 999px;
+  padding: 5px 6px 5px 12px;
+  font-weight: 800;
+}
+.player-chip .dot { width: 14px; height: 14px; border-radius: 50%; }
+.player-chip button {
+  border: none;
+  background: #ff5d5d;
+  color: #fff;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.empty-note { opacity: 0.6; font-weight: 700; padding: 8px; }
+
+/* Energy bar */
+#energy-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  width: min(360px, 70vw);
+  z-index: 5;
+  pointer-events: none;
+  text-align: center;
+}
+.energy-label { font-size: 22px; font-weight: 900; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+.energy-track { height: 16px; border-radius: 10px; background: rgba(0,0,0,0.35); overflow: hidden; border: 2px solid rgba(255,255,255,0.6); }
+#energy-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ffd23f, #3ddc84); transition: width 0.15s; }
+#energy-bar.low #energy-fill { background: #ff5d5d; }
+.energy-hint { font-size: 13px; font-weight: 800; margin-top: 3px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+body.touch .energy-hint { display: none; }
+#btn-math {
+  position: fixed;
+  z-index: 6;
+  right: calc(16px + env(safe-area-inset-right));
+  top: calc(120px + env(safe-area-inset-top));
+  border: none;
+  border-radius: 14px;
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 900;
+  font-size: 18px;
+  background: #ffd23f;
+  color: #22324d;
+  box-shadow: 0 4px 0 #c9a21c;
+}
+
+/* Live leaderboard (top right) */
+#race-board {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 190px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 14px;
+  padding: 8px 12px;
+  font-weight: 800;
+  font-size: 15px;
+}
+#race-board:empty { display: none; }
+#race-board .row-item { display: flex; justify-content: space-between; gap: 14px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+#race-board .row-item.me { color: #ffd23f; }
+#race-board .title { font-size: 12px; opacity: 0.8; margin-bottom: 2px; }
+body.race-host #race-board { top: 70px; right: 20px; font-size: 22px; min-width: 300px; padding: 12px 18px; }
+#btn-end-race { position: fixed; left: 20px; bottom: 20px; z-index: 6; }
+body.touch #race-board { top: auto; bottom: 8px; right: 50%; transform: translateX(50%); font-size: 12px; min-width: 0; padding: 4px 10px; max-width: 40vw; }
+body.touch #race-board .row-item:nth-child(n+5) { display: none; }
+
+/* 3-2-1-GO */
+#countdown {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 8;
+  pointer-events: none;
+  font-size: min(30vw, 220px);
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 8px 0 #1d5fbf, 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+#countdown.go { color: #3ddc84; text-shadow: 0 8px 0 #1f9d57, 0 12px 30px rgba(0, 0, 0, 0.4); }
+
+/* Math panel */
+#math-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 40, 80, 0.35);
+}
+.math-card {
+  background: #fff;
+  color: #22324d;
+  border-radius: 22px;
+  padding: 18px 22px;
+  width: min(380px, 94vw);
+  max-height: 96vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: center;
+  box-shadow: 0 10px 0 rgba(0,0,0,0.15), 0 20px 50px rgba(0,0,0,0.3);
+}
+.math-energy { font-weight: 900; font-size: 18px; color: #c9a21c; }
+#math-msg { font-weight: 800; font-size: 15px; }
+#math-question { font-size: 48px; font-weight: 900; line-height: 1.1; }
+#math-answer {
+  font-size: 36px;
+  font-weight: 900;
+  min-height: 52px;
+  border: 3px solid #d5deec;
+  border-radius: 14px;
+  font-variant-numeric: tabular-nums;
+}
+#math-answer:empty::before { content: '?'; opacity: 0.25; }
+#math-feedback { font-weight: 900; min-height: 1.3em; }
+#math-feedback.good { color: #1f9d57; }
+#math-feedback.bad { color: #d63031; }
+.math-card.shake { animation: shake 0.35s; }
+@keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.keypad button {
+  font: inherit;
+  font-size: 26px;
+  font-weight: 900;
+  padding: 10px 0;
+  border: none;
+  border-radius: 12px;
+  background: #e3e9f4;
+  color: #22324d;
+  touch-action: manipulation;
+  cursor: pointer;
+  box-shadow: 0 3px 0 #c3cede;
+}
+.keypad button:active { transform: translateY(2px); box-shadow: 0 1px 0 #c3cede; }
+.keypad .key-enter { background: #3ddc84; color: #fff; box-shadow: 0 3px 0 #1f9d57; }
+.keypad .key-back { background: #ffd8d8; }
+#math-close:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Results */
+.results-panel { max-width: 520px; }
+#results-list { list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+#results-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 800;
+  font-size: 18px;
+  background: #eef4ff;
+  border-radius: 12px;
+  padding: 8px 14px;
+}
+#results-list li.me { background: #fff6d6; }
+#results-list li:nth-child(1) { font-size: 22px; background: #fff1b8; }
+
+@media (max-width: 700px), (max-height: 500px) {
+  #host-code { font-size: 42px; letter-spacing: 6px; }
+  #math-question { font-size: 34px; }
+  #math-answer { font-size: 26px; min-height: 40px; }
+  .keypad button { font-size: 20px; padding: 6px 0; }
+  .title-panel .btn.orange { width: 250px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .math-card { width: min(560px, 94vw); display: grid; grid-template-columns: 1fr 1fr; align-items: center; }
+  .math-card > :not(.keypad) { grid-column: 1; }
+  .math-card .keypad { grid-column: 2; grid-row: 1 / span 6; }
+}
+body:not(.touch) #btn-math { display: none !important; }
+body.race-host #crosshair, body.race-host #hud-hint { display: none; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); transform: none !important; }
